@@ -1,0 +1,277 @@
+---
+title: "Final Project Youtube"
+author: "Harshitha Bhaskar"
+date: "4/7/2019"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+
+
+PACKAGES USED - 
+rvest
+ggplot2
+httr
+stringr
+lubridate
+tidyverse
+tidyr
+
+ONE MORE PROBLEM FACED THAT WAS MISSED IN THE REPORT - there was one datapoint that was in the top 250 - 'legend98' that had no channel, that
+is the channel was deleted. I had to remove this from the database
+
+Chunk reads root nodes of SocialBlade
+```{r}
+library(rvest)
+
+socialb_page_US <- read_html("https://socialblade.com/youtube/top/country/us")
+html_children(socialb_page_US)
+root_US <- html_node(socialb_page_US, 'body')
+```
+
+Chunk scrapes for top 250 channel names
+```{r}
+US_250 <- socialb_page_US %>% html_nodes("div+ div div+ div a") %>% html_text()
+US_250 <- as.data.frame(US_250)
+US_250 <- data.frame(US_250[-(1:149),])
+US_250 <- data.frame(US_250[-(251:267),])
+US_250 <- data.frame(US_250[-(99),])
+```
+
+Chunk scrapes for top 250 channel raw links
+```{r}
+US_Links <- as.data.frame(socialb_page_US %>% html_nodes("div+ div div+ div a") %>% html_attr("href"))
+US_Links <- data.frame(US_Links[-(1:149),])
+US_Links <- data.frame(US_Links[-(251:267),])
+US_Links <- data.frame(US_Links[-(99),])
+```
+
+Chunk modifies the links to append YouTube for future scrapping
+```{r}
+library(stringr)
+Youtube_Link <- cbind(US_Links)
+Youtube_Link$US_Links...99.... <-  str_replace(Youtube_Link$US_Links...99...., 'youtube/', '')
+Youtube_Link$US_Links...99.... = paste0('https://youtube.com', Youtube_Link$US_Links...99....)
+```
+
+Chunk scrapes for top 250 channel SocaalBlade links and modifies them depending on whether or not YouTube throws an error when accessing link
+```{r}
+US_Links$US_Links...99.... = paste0('https://socialblade.com', US_Links$US_Links...99....)
+US_Links$US_Links...99.... = paste0(US_Links$US_Links...99...., '/monthly')
+
+for (i in 1:249) {
+  if (httr::http_error(Youtube_Link$US_Links...99....[i])){
+    US_Links$US_Links...99....[i] <- str_replace(US_Links$US_Links...99....[i], 'https://socialblade.com/youtube/user/', 'https://socialblade.com/youtube/channel/UC')
+  }
+}
+```
+
+Chunk scrapes for top 250 channel number of video uploads
+```{r}
+US_Uploads <- socialb_page_US %>% html_nodes("div div div+ div div:nth-child(4) span") %>% html_text()
+US_Uploads <- as.data.frame(US_Uploads)
+US_Uploads <- data.frame(US_Uploads[-(99),])
+```
+
+Chunk scrapes for top 250 channel subscriber counts
+```{r}
+US_subs <- socialb_page_US %>% html_nodes("div div div+ div div:nth-child(5) span") %>% html_text()
+US_subs <- as.data.frame(US_subs)
+US_subs <- data.frame(US_subs[-(99),])
+```
+
+Chunk scrapes for top 250 channel number of views
+```{r}
+US_Views <- socialb_page_US %>% html_nodes("div div div div:nth-child(6) span") %>% html_text()
+US_Views <- as.data.frame(US_Views)
+US_Views <- data.frame(US_Views [-(99),])
+```
+
+Chunk combines all above columns into one datafram
+```{r}
+US_Youtube <- cbind(US_250, US_Uploads, US_subs, US_Views, US_Links)
+colnames(US_Youtube)[1] <- "name"
+```
+
+findCategory is a function that scrapes the SocialBlade URL based on the category name fed.
+US_Categories is the list of all 250 channels in each category 
+The 150-251 range is used to eliminate unwated data of buttons read, etc.
+```{r}
+findCategory <- function(categoryName){
+  category_url <- 'https://socialblade.com/youtube/top/category/%s'
+  category_url <- sprintf(category_url, URLencode(categoryName))
+  category_page <- read_html(category_url)
+
+  each_category <- as.data.frame(category_page %>% html_nodes("div+ div div+ div a") %>% html_text())
+  each_category <- data.frame(each_category[-(0:149),])
+  each_category <- data.frame(each_category[-(251:267),])
+  each_category$category <- c(categoryName)
+
+  return(each_category)
+}
+
+US_categories <- rbind(findCategory('autos'), findCategory('comedy'), findCategory('education'), findCategory('film'), findCategory('games'), findCategory('howto'), findCategory('music'), findCategory('news'), findCategory('nonprofit'), findCategory('people'), findCategory('animals'), findCategory('tech'), findCategory('shows'), findCategory('sports'), findCategory('travel'), findCategory('entertainment'))
+
+colnames(US_categories)[1] <- "name"
+colnames(US_Youtube)[5] <- "SocialBlade Monthly Stats Link"
+```
+
+Chunk attaches top 250 channels with tehir categories
+```{r}
+library(dplyr)
+US_Youtube <- left_join(US_Youtube, US_categories, by = "name")
+```
+Function to find the monthly anthing of SocialBlade channels
+```{r}
+find_monthly <- function(num, css_selector){
+    i <- as.numeric(num)
+  page <- read_html(US_Youtube$`SocialBlade Monthly Stats Link`[i])
+  subscriber_change <- page %>% html_nodes(css_selector) %>% html_text()
+  subscriber_change <- as.data.frame(subscriber_change)
+  subscriber_change <- data.frame(subscriber_change[-(31:nrow(subscriber_change)),])
+  subscriber_change <-  cbind(subscriber_change, US_Youtube$`SocialBlade Monthly Stats Link`[i], US_Youtube$name[i], US_Youtube$category[i])
+  return(subscriber_change)
+}
+```
+
+ForLoop to generate subscriber change
+```{r}
+US_subscriber_change = data.frame()
+for (k in 1:249){
+  if (!httr::http_error(US_Youtube$`SocialBlade Monthly Stats Link`[k])){
+    US_subscriber_change <- rbind(US_subscriber_change, find_monthly(k, "div div div div+ div:nth-child(3) div > span"))
+  }
+}
+```
+
+Cleaning up the df
+```{r}
+US_subscriber_change$subscriber_change...31.nrow.subscriber_change..... <-  as.character(US_subscriber_change$subscriber_change...31.nrow.subscriber_change.....)
+US_subscriber_change <- US_subscriber_change[!(US_subscriber_change$subscriber_change...31.nrow.subscriber_change.....=="--"),]
+US_subscriber_change$sign <- substr(US_subscriber_change$subscriber_change...31.nrow.subscriber_change....., 1, 1)
+US_subscriber_change$subscriber_change...31.nrow.subscriber_change..... <- sub(',', '', US_subscriber_change$subscriber_change...31.nrow.subscriber_change.....)
+US_subscriber_change$subscriber_change...31.nrow.subscriber_change..... <- as.numeric(US_subscriber_change$subscriber_change...31.nrow.subscriber_change.....)
+```
+
+temp df for test
+```{r}
+temp_df <-  US_subscriber_change %>% group_by(`US_Youtube$name[i]`)
+by_temp <- temp_df %>% summarise(sum(temp_df$subscriber_change...31.nrow.subscriber_change.....))
+
+```
+funtion to generate sub-graphs for test purposes
+```{r}
+library(ggplot2)
+make_sub_graph <- function(df){
+  ggplot(df, mapping = aes(x = df$`US_Youtube$name[i]`, y = df$subscriber_change...31.nrow.subscriber_change....., colour = df$`US_Youtube$name[i]`)) + geom_density(mapping = aes(y = ..density..))
+}
+
+education_subset <- subset(US_subscriber_change, US_subscriber_change$`US_Youtube$category[i]` == 'education')
+make_sub_graph(education_subset)
+# ggplot(education_subset, mapping = aes(x = education_subset$`US_Youtube$name[i]`, y = education_subset$subscriber_change...31.nrow.subscriber_change....., colour = education_subset$`US_Youtube$name[i]`)) + geom_density(mapping = aes(y = ..density..))
+
+comedy_subset <- subset(US_subscriber_change, US_subscriber_change$`US_Youtube$category[i]` == 'comedy')
+make_sub_graph(comedy_subset)
+# ggplot(comedy_subset, mapping = aes(x = comedy_subset$`US_Youtube$name[i]`, y = comedy_subset$subscriber_change...31.nrow.subscriber_change....., colour = comedy_subset$`US_Youtube$name[i]`)) + geom_density(mapping = aes(y = ..density..))
+
+entertainment_subset <- subset(US_subscriber_change, US_subscriber_change$`US_Youtube$category[i]` == 'entertainment')
+# make_sub_graph(entertainment_subset) + theme(legend.title = element_blank())
+ggplot(entertainment_subset, mapping = aes(x = entertainment_subset$`US_Youtube$name[i]`, y = entertainment_subset$subscriber_change...31.nrow.subscriber_change.....)) + geom_density(mapping = aes(y = ..density..))
+
+film_subset <- subset(US_subscriber_change, US_subscriber_change$`US_Youtube$category[i]` == 'film')
+make_sub_graph(film_subset)
+
+
+make_sub_graph(US_subscriber_change) 
+ggplot(US_subscriber_change, mapping = aes(x = US_subscriber_change$`US_Youtube$category[i]`, y = US_subscriber_change$subscriber_change...31.nrow.subscriber_change.....,fill = US_subscriber_change$`US_Youtube$category[i]`)) + geom_density(mapping = aes(y = ..density..)) + facet_grid(.~US_subscriber_change$`US_Youtube$category[i]`) + guides(fill=guide_legend(title="Category"))
+```
+forloop for minthly income for channels
+```{r}
+income <- data.frame()
+for (k in 1:249){
+  if (!httr::http_error(US_Youtube$`SocialBlade Monthly Stats Link`[k])){
+    income <- rbind(income, find_monthly(k, "#dialog_favorite_limitreached+ div div div div div+ div:nth-child(5)"))
+  }
+}
+```
+
+This chunk generates an error as of 17th April as SocialBlade has been down and acting up. I am unsure as to why is is down, but the site is mostly unresposnsive and slow.
+
+# ```{r}
+# dates <- data.frame()
+# 
+# for (j in 3:930){
+#     if (!httr::http_error(US_Youtube$`SocialBlade Monthly Stats Link`[j])){
+#     dates <- rbind(dates, find_monthly(j, "#dialog_favorite_limitreached+ div div+ div div:nth-child(1)"))
+#     j = j + 3
+#   }
+# }
+# ```
+
+Cleaning up of columns
+```{r}
+library(tidyverse)
+colnames(income)[1] <- "Daily Income"
+income <- separate(income, 'Daily Income', into = c("Min", "Max"), sep = "-")
+```
+
+```{r}
+income$Min <- sub('\\.', '', income$Min)
+income$Max <- sub('\\.', '', income$Max)
+income$Min <- sub('K', '00', income$Min)
+income$Max <- sub('K', '00', income$Max)
+income$Min <- sub('\\$', '00', income$Min)
+income$Max <- sub('\\$', '00', income$Max)
+```
+Geaphing data
+```{r}
+ggplot(income, mapping = aes(x = income$`US_Youtube$category[i]`, y = income$Min ,fill = income$`US_Youtube$category[i]`)) + geom_density(mapping = aes(y = ..density..)) 
+ggplot(income, mapping = aes(x = income$`US_Youtube$category[i]`, y = income$Max ,fill = income$`US_Youtube$category[i]`)) + geom_density(mapping = aes(y = ..density..))  #geom_density(mapping = aes(y = ..density..))#+ facet_grid(.~income$`US_Youtube$category[i]`) + guides(fill=guide_legend(title="Category"))
+```
+generating chnage in views
+```{r}
+views <- data.frame()
+for (k in 1:249){
+  if (!httr::http_error(US_Youtube$`SocialBlade Monthly Stats Link`[k])){
+    views <- rbind(views, find_monthly(k, "div:nth-child(4) div span"))
+  }
+}
+```
+Clean up
+```{r}
+colnames(views)[1] <- "Change in Views"
+views$`Change in Views` <- as.character(views$`Change in Views`)
+views$`Change in Views` <- str_replace(views$`Change in Views`, ',', '')
+views$`Change in Views` <- str_replace(views$`Change in Views`, ',', '')
+views$`Change in Views` <- as.numeric(views$`Change in Views`)
+```
+graphing
+```{r}
+ggplot(income, mapping = aes(x = income$`US_Youtube$category[i]`, y = income$Min,fill = income$`US_Youtube$category[i]`)) + geom_density(mapping = aes(y = ..density..)) 
+
+ggplot(views, mapping = aes(x = views$`US_Youtube$category[i]`, y = views$`Change in Views`,fill = views$`US_Youtube$category[i]`)) + geom_density(mapping = aes(y = ..density..)) #+ facet_grid(.~views$`US_Youtube$category[i]`) #+ guides(fill=guide_legend(title="Category"))
+```
+Databse connect atempt
+```{r}
+library(RSQLite)
+
+db <- dbConnect(SQLite(), dbname = "Youtube Analysis")
+
+dbRemoveTable(db, "Youtube_Channels")
+# dbRemoveTable(db, "Monthly Data")
+
+dbSendQuery(db, "CREATE TABLE Youtube_Channels(channel_name VARCHAR(100) NOT NULL, no_of_videos INTEGER NOT NULL, no_of_subscribers INTEGER NOT NULL, no_of_views INTEGER NOT NULL, monthly_stats_link VARCHAR(150) NOT NULL PRIMARY KEY, category VARCHAR(50))")
+
+# dbWriteTable(conn = db, value = US_Youtube, row.names = FALSE, header = TRUE, overwrite = TRUE)
+dbWriteTable(conn = db, name =  "Youtube_Channels", value = US_Youtube, row.names = FALSE, header = TRUE, overwrite = TRUE)
+```
+
